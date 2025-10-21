@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\TicketStoreRequest;
+use App\Http\Requests\TicketReplyStoreRequest;
 use App\Models\Ticket;
 // use Illuminate\Container\Attributes\DB;
 use Illuminate\Support\Facades\DB;
@@ -53,10 +54,30 @@ class TicketController extends Controller
     public function show( $code )
     {
         try {
-            $ticket = Ticket::where('code', $code)->firstOrFail();
+            $ticket = Ticket::where('code', $code)->first();
 
-        } catch (\Throwable $th) {
-            //throw $th;
+            if(!$ticket){
+                return response()->json([
+                    'message' => 'Ticket not found',
+                ], 404);
+            }
+
+            if(auth()->user()->role == 'user' && $ticket->user_id !=  auth()->user()->id){
+                return response()->json([
+                    'message' => 'Unauthorized',
+                ], 403);
+            }
+
+            return response()->json([
+                'message' => 'Ticket retrieved successfully',
+                'data' => new TicketResource($ticket)
+            ], 200);
+
+        } catch (\Exception $e ) {
+            return response()->json([
+                'message' => 'Failed to retrieve ticket',
+                'error' => $e->getMessage()
+            ], 500);
         }
     }
 
@@ -90,6 +111,50 @@ class TicketController extends Controller
         }
     }
 
+    public function storeReply( TicketReplyStoreRequest $request, $code )
+    {
+        $data = $request->validated();
 
+        DB::beginTransaction();
+        try {
+            $ticket = Ticket::where('code', $code)->first();    
+            if(!$ticket){
+                return response()->json([
+                    'message' => 'Ticket not found',
+                ], 404);
+            } 
+            if(auth()->user()->role == 'user' && $ticket->user_id !=  auth()->user()->id){
+                return response()->json([
+                    'message' => 'Unauthorized',
+                ], 403);
+            }
+            $ticketReply = new \App\Models\TicketReply();
+            $ticketReply->ticket_id = $ticket->id;
+            $ticketReply->user_id = auth()->user()->id;
+            $ticketReply->content = $data['content'];
+            $ticketReply->save();
+
+            if(auth()->user()->role == 'admin'){
+                $ticket->status = $data['status'];
+                if( $data['status'] == 'resolved' ) {
+                    $ticket->completed_at = now();
+                }
+                $ticket->save();
+            }
+            DB::commit();
+            return response()->json([
+                'message' => 'Reply added successfully',
+                'data' => new TicketResource($ticket) //esto quedo diferente que en el video
+            ], 201);
+        }
+
+        catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'message' => 'Failed to add reply to ticket',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
 
 }
